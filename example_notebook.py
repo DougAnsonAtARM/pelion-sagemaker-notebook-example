@@ -244,7 +244,7 @@ class MyNotebook:
             return prediction_result_tensor_json
     
     # Some models need to have the raw tensor bytestream converted to float32 values (re-dim)        
-    def bytedata_to_float32data(self, tensor, float_byte_len):
+    def bytedata_to_float32data(self, tensor, float_bytelen):
         tensor_raw_byte_data = tensor['byte_data']
         tensor_byte_data_np = np.frombuffer(tensor_raw_byte_data, dtype=np.dtype('B'))  # raw byte data is uint8
         float_tensor_byte_array = []
@@ -253,12 +253,12 @@ class MyNotebook:
         while i < length:
             float_tensor_byte_array.append(
                 float(self.float_format_str.format(
-                    float('.'.join(str(elem) for elem in struct.unpack(self.endian_format_str, memoryview(tensor_byte_data_np[i:(i+float_byte_len)])))
+                    float('.'.join(str(elem) for elem in struct.unpack(self.endian_format_str, memoryview(tensor_byte_data_np[i:(i+float_bytelen)])))
                         )    
                     )
                 )
             )
-            i += float_byte_len
+            i += float_bytelen
 
         # update our tensor
         tensor['float32_data'] = float_tensor_byte_array
