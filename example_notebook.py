@@ -24,7 +24,7 @@ import tarfile
 import time
 import json
 
-# Pelion Sagemaker Controller UI Import
+# Pelion Sagemaker Controller API Import
 from pelion_sagemaker_controller import pelion_sagemaker_controller
 
 class MyNotebook:
@@ -34,6 +34,12 @@ class MyNotebook:
 
         # Float formatting...
         self.float_format_str = "{:.8f}"
+        
+        # Float unpack format
+        self.endian_format_str = '!f'
+        
+        # Float byte length 
+        self.float_bytelen = 4
         
         # Initialize Sagemaker
         self.sagemaker_init()
@@ -238,7 +244,7 @@ class MyNotebook:
             return prediction_result_tensor_json
     
     # Some models need to have the raw tensor bytestream converted to float32 values (re-dim)        
-    def bytedata_to_float32data(self, tensor):
+    def bytedata_to_float32data(self, tensor, float_byte_len):
         tensor_raw_byte_data = tensor['byte_data']
         tensor_byte_data_np = np.frombuffer(tensor_raw_byte_data, dtype=np.dtype('B'))  # raw byte data is uint8
         float_tensor_byte_array = []
@@ -247,12 +253,12 @@ class MyNotebook:
         while i < length:
             float_tensor_byte_array.append(
                 float(self.float_format_str.format(
-                    float('.'.join(str(elem) for elem in struct.unpack('<f', memoryview(tensor_byte_data_np[i:(i+4)])))
+                    float('.'.join(str(elem) for elem in struct.unpack(self.endian_format_str, memoryview(tensor_byte_data_np[i:(i+float_byte_len)])))
                         )    
                     )
                 )
             )
-            i += 4
+            i += float_byte_len
 
         # update our tensor
         tensor['float32_data'] = float_tensor_byte_array
@@ -287,7 +293,7 @@ class MyNotebook:
         tensor = self.create_output_tensor(input_image_filename, local_output_tensor_filename)  
         
         # For Imagenet analysis, we convert the tensor byte data to float32 data
-        tensor = self.bytedata_to_float32data(tensor)
+        tensor = self.bytedata_to_float32data(tensor,self.float_bytelen)
         
         # Next lets use Imagenet to provide a prediction analysis
         self.imagenet_prediction_analyzer(tensor['float32_data'])
