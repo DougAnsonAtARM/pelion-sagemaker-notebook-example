@@ -36,7 +36,7 @@ class MyNotebook:
         self.float_format_str = "{:.8f}"
         
         # Float unpack format
-        self.endian_format_str = '!f'
+        self.endian_format_str = '<f'
         
         # Float byte length 
         self.float_bytelen = 4
