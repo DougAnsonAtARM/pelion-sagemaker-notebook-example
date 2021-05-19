@@ -297,4 +297,5 @@ class MyNotebook:
         
         # Next lets use Imagenet to provide a prediction analysis
         self.imagenet_prediction_analyzer(tensor['float32_data'])
+        return tensor
                 
