@@ -28,7 +28,7 @@ import json
 from pelion_sagemaker_controller import pelion_sagemaker_controller
 
 class MyNotebook:
-    def __init__(self, api_key, device_id, endpoint_api):
+    def __init__(self, api_key, device_id, endpoint_api, aws_s3_folder):
         # Some misc settings we'll use in the analysis portions
         self.num_bytes = 5
 
@@ -42,13 +42,13 @@ class MyNotebook:
         self.float_bytelen = 4
         
         # Initialize Sagemaker
-        self.sagemaker_init()
+        self.sagemaker_init(aws_s3_folder)
         
         # Initialize Pelion Sagemaker Controller API
         self.pelion_sagemaker_controller_init(api_key, device_id, endpoint_api)
     
     # Sagemaker Init()
-    def sagemaker_init(self):
+    def sagemaker_init(self,aws_s3_folder):
         print("")
         print("Initializing Sagemaker and S3...")
         self.s3 = boto3.resource('s3')
@@ -65,7 +65,7 @@ class MyNotebook:
         # Feel free to specify different bucket/folders here if you wish.
         self.bucket = self.sess.default_bucket()
         print('Default Bucket: ' + self.bucket)
-        self.folder = 'DEMO-Sagemaker-Edge'
+        self.folder = aws_s3_folder
         self.compilation_output_sub_folder = self.folder + '/compilation-output'
         self.iot_folder = self.folder + '/iot'
 
