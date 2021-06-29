@@ -9,10 +9,6 @@ import botocore
 import tensorflow as tf
 import numpy as np
 
-# Image Imports
-from PIL import Image
-import matplotlib.pyplot as plt
-
 # Core Imports
 import os
 import mmap
@@ -23,6 +19,10 @@ import time
 import tarfile
 import time
 import json
+
+# TF Helpers
+from tensorflow.keras.preprocessing.image import load_img, img_to_array
+from IPython.display import Image, display
 
 # Pelion Sagemaker Controller API Import
 from pelion_sagemaker_controller import pelion_sagemaker_controller
@@ -80,7 +80,7 @@ class MyNotebook:
     # Pelion Sagemaker Controller Init()
     def pelion_sagemaker_controller_init(self, api_key, device_id, endpoint_api = 'api.us-east-1.mbedcloud.com'):
         print("")
-        print("Initializing Pelion Sagemaker Controller. Pelion API: " + endpoint_api + " Edge GW DeviceID: " + device_id)
+        print("Initializing Pelion Sagemaker Controller. Pelion API: " + endpoint_api + " Pelion Sagemaker Edge Agent PT DeviceID: " + device_id)
         
         # Create an instance of the Controller API...
         self.pelion_api = pelion_sagemaker_controller.ControllerAPI(api_key,device_id,endpoint_api)
@@ -98,7 +98,8 @@ class MyNotebook:
             
     # Save off the model
     def save_model(self, model_basename):
-        self.model.save(model_basename + '.h5')
+        # self.model.save(model_basename + '.h5')
+        tf.keras.models.save_model(self.model,model_basename + '.h5')
         
         with tarfile.open(model_basename + '.tar.gz', mode='w:gz') as archive:
             archive.add(model_basename + '.h5')
@@ -197,105 +198,65 @@ class MyNotebook:
         with open(local_output_tensor_filename, 'wb') as f:
             self.s3_client.download_fileobj(self.bucket, output_tensor_filename, f)
     
-    # We take the prediction result data and create a JSON-based output tensor           
-    def create_output_tensor(self, input_filename, output_tensor_filename):
-        # Read in the output tensor file
-        file_size = os.path.getsize(output_tensor_filename)
-        print("Prediction Output File Size: " + str(file_size) + " bytes")
-        with open(output_tensor_filename, 'r') as fh:
-            m = mmap.mmap(fh.fileno(), 0, access=mmap.ACCESS_READ)
-            tensor_bytearray = bytearray(m)
+    # JSON Tensor to Numpy Tensor (float)        
+    def json_tensor_to_numpy_float_tensor(self, json_tensor):
+        # Convert our JSON-based output tensor to a numpy tensor (with byte values initially...)
+        tensor_byte_data_np = np.frombuffer(base64.b64decode(json_tensor['b64_data']), dtype=np.dtype('B'))
 
-        # Read in the input bitmap filesize
-        file_size = os.path.getsize(input_filename)
-        print("Input Image File Size: " + str(file_size) + " bytes")
-        input_image_tensor = tf.read_file(input_filename)
-        print("")
+        # Reshape our numpy tensor per the number of imput images 
+        rs_tensor_byte_data_np = np.reshape(tensor_byte_data_np,[json_tensor['shape'][0],(json_tensor['shape'][1]*self.float_bytelen)])
+        print("JsonTensorToNumpyFloatTensor: Reshaped: " + str(tensor_byte_data_np.shape) + " -> " + str(rs_tensor_byte_data_np.shape))
 
-        # Convert the input file to a input Tensor in TF...
-        with tf.Session() as mysess:
-            # Convert input image to numpy array
-            input_image_np = mysess.run(input_image_tensor)
-            # print('Input Image Tensor: ', input_image_tensor)
-            print('Input Image Tensor Byte Array Length: ' + str(len(input_image_np)))
-            print('Input Image Byte Array (first ' + str(self.num_bytes) + ' bytes): ' + str(input_image_np[0:self.num_bytes]) + "...")
-            print("")
-
-        # Read in the prediction result contents and convert it to a TF constant Tensor
-        with open(output_tensor_filename, mode='r') as file:
-            prediction_result_tensor_json_str = file.read()
-
-            # Pelion's Sagemaker Controller packages the AWS Sagemaker Result Tensor as a JSON... so we can parse it here
-            prediction_result_tensor_json = json.loads(prediction_result_tensor_json_str)
-            prediction_result_tensor_json['byte_data'] = base64.decodebytes(prediction_result_tensor_json['b64_data'].encode('ascii'))
-            
-            # Record the input filename as well
-            prediction_result_tensor_json['input_data'] = input_image_np
-
-            # Display our Prediction Result Tensor Details
-            print("Prediction Result Tensor Name: " + prediction_result_tensor_json['name'])
-            print("Prediction Result Tensor Shape: " + str(prediction_result_tensor_json['shape']))
-            print("Prediction Result Tensor Type: " + str(prediction_result_tensor_json['type']))
-            print("Prediction Result Tensor Data (first " + str(self.num_bytes) + " of " 
-                + str(len(prediction_result_tensor_json['byte_data'])) + " values): " 
-                + str(prediction_result_tensor_json['byte_data'][0:self.num_bytes]) + "...")
-            
-            # return our raw tensor
-            return prediction_result_tensor_json
-    
-    # Some models need to have the raw tensor bytestream converted to float32 values (re-dim)        
-    def bytedata_to_float32data(self, tensor, float_bytelen):
-        tensor_raw_byte_data = tensor['byte_data']
-        tensor_byte_data_np = np.frombuffer(tensor_raw_byte_data, dtype=np.dtype('B'))  # raw byte data is uint8
-        float_tensor_byte_array = []
-        length = len(tensor_byte_data_np)
+        # Convert to Floats each of 4 bytes, then to numpy float array
+        float_array = []
+        length = rs_tensor_byte_data_np.shape[0]
+        ie_length = rs_tensor_byte_data_np.shape[1]
         i = 0
         while i < length:
-            float_tensor_byte_array.append(
-                float(self.float_format_str.format(
-                    float('.'.join(str(elem) for elem in struct.unpack(self.endian_format_str, memoryview(tensor_byte_data_np[i:(i+float_bytelen)])))
-                        )    
+            image_entry = [];
+
+            j = 0
+            while j < ie_length:
+                image_entry.append(
+                    float(self.float_format_str.format(
+                        float('.'.join(str(elem) for elem in struct.unpack(self.endian_format_str, memoryview(rs_tensor_byte_data_np[i][j:(j+self.float_bytelen)])))
+                            )    
+                        )
                     )
                 )
-            )
-            i += float_bytelen
-
-        # update our tensor
-        tensor['float32_data'] = float_tensor_byte_array
-        
-        # display the formatted float array
-        print("Prediction Result Tensor Data as Float32 (first " + str(self.num_bytes) + " of " 
-                + str(len(tensor['float32_data'])) + " values): " 
-                + str(tensor['float32_data'][0:self.num_bytes]) + "...")
-        
-        # return the tensor
-        return tensor
-
-    # invoke the Imagenet prediction decoder to analyze the prediction results
-    def imagenet_prediction_analyzer(self, float_prediction_data):
-        # Now, lets look at the predictions and see how accurate our model was
-        pred_arr = np.expand_dims(float_prediction_data, axis=0)
-        prediction_results = tf.keras.applications.imagenet_utils.decode_predictions(pred_arr)[0]
-
-        # Lets Display the results
-        print("")
-        print('Top Image Detection Results from Imagnet:')
-        for result in prediction_results:
-            result_json = {}
-            result_json['class'] = result[0]
-            result_json['description'] = result[1]
-            result_json['prob_percent'] = float(self.float_format_str.format(100.0 * result[2]))
-            print(json.dumps(result_json)) 
+                j += self.float_bytelen
+            float_array.append(image_entry)
+            i += 1
             
-    # Display our prediction results
-    def display_results(self, input_image_filename, local_output_tensor_filename):
-        # Lets create our Output Tensor
-        tensor = self.create_output_tensor(input_image_filename, local_output_tensor_filename)  
-        
-        # For Imagenet analysis, we convert the tensor byte data to float32 data
-        tensor = self.bytedata_to_float32data(tensor,self.float_bytelen)
-        
-        # Next lets use Imagenet to provide a prediction analysis
-        self.imagenet_prediction_analyzer(tensor['float32_data'])
-        return tensor
-                
+        # Return a numpy float array
+        return np.asarray(float_array) 
+
+    # Imagenet-based results display
+    def display_images(self, my_list, most_likely_labels=None):
+        for i, img in enumerate(my_list):
+            display(img)
+            if most_likely_labels != None:
+                print(most_likely_labels[i])
+
+    # Read in and prepare our images for prediction processing by ResNet50 model
+    def read_and_prep_images(self, img_paths, img_height, img_width):
+        global image_list
+        image_list = [load_img(img_path, target_size=(img_height, img_width)) for img_path in img_paths if os.path.isfile(img_path)]
+        return np.array([img_to_array(img) for img in image_list])
+
+    # Decode our imagenet based predictions
+    def decode_predictions(self, preds, top=5, class_list_path=None):
+        if len(preds.shape) != 2 or preds.shape[1] != 1000:
+            raise ValueError('`decode_predictions` expects '
+                         'a batch of predictions '
+                         '(i.e. a 2D array of shape (samples, 1000)). '
+                         'Found array with shape: ' + str(preds.shape))
+        CLASS_INDEX = json.load(open(class_list_path))
+        results = []
+        for pred in preds:
+            top_indices = pred.argsort()[-top:][::-1]
+            result = [tuple(CLASS_INDEX[str(i)]) + (pred[i],) for i in top_indices]
+            result.sort(key=lambda x: x[2], reverse=True)
+            results.append(result)
+        return results
+    
