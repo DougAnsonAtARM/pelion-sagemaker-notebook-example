@@ -8,6 +8,8 @@ import boto3
 import botocore
 import tensorflow as tf
 import numpy as np
+from numpy import asarray
+from numpy import moveaxis
 
 # Core Imports
 import os
@@ -197,8 +199,13 @@ class MyNotebook:
                 print(most_likely_labels[i])
 
     # Read in and prepare our images for prediction processing
-    def read_and_prep_images(self, img_paths, img_height, img_width):
+    def read_and_prep_images(self, img_paths, img_height, img_width, channels_first=False):
         img_list = [load_img(img_path, target_size=(img_height, img_width)) for img_path in img_paths if os.path.isfile(img_path)]
+        if channels_first == True:
+            for img in img_list:
+                data = asarray(img)
+                # change channels last to channels first format
+                data = moveaxis(data, 2, 0)
         array_list =  np.array([img_to_array(img) for img in img_list])
         return {"img":img_list, "array":array_list}
     
