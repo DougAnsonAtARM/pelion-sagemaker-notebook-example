@@ -194,11 +194,75 @@ class MyNotebook:
         for i, img in enumerate(my_list):
             display(img)
             if most_likely_labels != None:
-                print(most_likely_labels[i])
+                pred = most_likely_labels[i]
+                pred_tuple = pred[0]
+                pred_name = pred_tuple[1]
+                pred_percent = round(pred_tuple[2]*100.0,3)
+                print("Predicted Image Contents: \"" + pred_name + "\" Confidence: " + str(pred_percent) +"%")
+            print("")
 
-    # Read in and prepare our images for prediction processing
-    def read_and_prep_images(self, img_paths, img_height, img_width):
+    # Read in a batch of images
+    def read_image_batch(self, img_paths, img_height, img_width):
         img_list = [load_img(img_path, target_size=(img_height, img_width)) for img_path in img_paths if os.path.isfile(img_path)]
         array_list =  np.array([img_to_array(img) for img in img_list])
         return {"img":img_list, "array":array_list}
     
+    # Save the input tensor for the sagemaker edge adgent PT to read in and pass to the AWS edge agent manager
+    def save_input_tensor_to_s3(self, input_tensor, input_data_filename):
+        # the Pelion edge agent PT expects the input tensor file to be organzed as a JSON
+        input_data_json = {}
+        input_data_json ['b64_data'] = base64.b64encode(input_tensor.numpy().data.tobytes()).decode('ascii')
+
+        # Save the input tensor JSON data...
+        print("Saving input tensor to file: " + input_data_filename)
+        with open(input_data_filename, 'w') as f:
+            f.write(json.dumps(input_data_json))
+            f.close()
+            
+        # Upload the images in the list to S3
+        print("")
+        print('Uploading saved input tensor to ' + self.iot_folder + " in S3 bucket " + self.bucket + ' as: ' + input_data_filename + "...")
+        print("")
+        self.sess.upload_data(input_data_filename, self.bucket, self.iot_folder)
+            
+    # Method to Decode ResNet50 based predictions
+    def decode_resnet50_predictions(self, preds, top=5, class_list_path=None):
+        if len(preds.shape) != 2 or preds.shape[1] != 1000:
+            raise ValueError('`decode_predictions` expects '
+                         'a batch of predictions '
+                         '(i.e. a 2D array of shape (samples, 1000)). '
+                         'Found array with shape: ' + str(preds.shape))
+        class_index = json.load(open(class_list_path))
+        results = []
+        for pred in preds:
+            top_indices = pred.argsort()[-top:][::-1]
+            result = [tuple(class_index[str(i)]) + (pred[i],) for i in top_indices]
+            result.sort(key=lambda x: x[2], reverse=True)
+            results.append(result)
+        return results
+    
+    # Pull the output tensor from s3 back into the notebook and parse/read it into a numpy...
+    def get_output_tensor(self, s3_filename, local_nb_filename, tensor_dtype=np.float32):
+        # Copy the results back to our notebook
+        print("")
+        print("Retrieving result: " + s3_filename + " Saving to: " + local_nb_filename + "...")
+        self.copy_results_to_notebook(s3_filename,local_nb_filename)
+
+        # Read in the output tensor file, convert it, then decode our predictions and display our results...
+        print("")
+        print("Opening Output File: " + local_nb_filename + "...")
+        file_size = os.path.getsize(local_nb_filename)
+        print("Prediction Output File Size: " + str(file_size) + " bytes")
+        with open(local_nb_filename, 'r') as file:
+            # Load the JSON-based tensor from its file in our notebook... 
+            json_tensor = json.loads(file.read())
+
+            # Convert the (Pelion PT specific) JSON-based tensor to an Numpy Tensor with the intended shape and dtype
+            uint8_buffer = base64.b64decode(json_tensor['b64_data'])
+            output_tensor = np.frombuffer(uint8_buffer, dtype=tensor_dtype)
+            output_tensor_reshaped = np.reshape(output_tensor,(json_tensor['shape'][0],json_tensor['shape'][1]))
+
+            # Display the prediction result tensor details...
+            print("")
+            print("Output Tensor (Reshaped) - Shape: " + json.dumps(output_tensor_reshaped.shape) + " Type: " + str(output_tensor_reshaped.dtype))
+            return output_tensor_reshaped
