@@ -183,9 +183,8 @@ class MyNotebook:
     
     # Copy our prediction results back to our notebook from S3...
     def copy_results_to_notebook(self, output_tensor_url, local_output_tensor_filename):
-        print("Output Tensor located here in S3: " + output_tensor_url)
         output_tensor_filename = output_tensor_url.replace('s3://','')
-        print("Copying Output Tensor: " + output_tensor_filename + ' to local notebook as: ' + local_output_tensor_filename)
+        print("Retrieving Output Tensor from S3: " + output_tensor_url + ". Saving locally to: " + local_output_tensor_filename + "...")
         with open(local_output_tensor_filename, 'wb') as f:
             self.s3_client.download_fileobj(self.bucket, output_tensor_filename, f)
     
@@ -244,7 +243,6 @@ class MyNotebook:
     # Pull the output tensor from s3 back into the notebook and parse/read it into a numpy...
     def get_output_tensor(self, s3_filename, local_nb_filename, tensor_dtype=np.float32):
         # Copy the results back to our notebook
-        print("Retrieving Output Tensor from S3: " + s3_filename + " Saving locally to: " + local_nb_filename + "...")
         self.copy_results_to_notebook(s3_filename,local_nb_filename)
 
         # Read in the output tensor file, convert it, then decode our predictions and display our results...
